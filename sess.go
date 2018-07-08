@@ -937,11 +937,11 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
 
-	return NewConn(raddr, block, dataShards, parityShards, &connectedUDPConn{udpconn})
+	return NewConn(raddr, block, dataShards, parityShards, udpconn)
 }
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
-func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
+func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn *net.UDPConn) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
@@ -949,7 +949,7 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 
 	var convid uint32
 	binary.Read(rand.Reader, binary.LittleEndian, &convid)
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, udpaddr, block), nil
+	return newUDPSession(convid, dataShards, parityShards, nil, &connectedUDPConn{conn}, udpaddr, block), nil
 }
 
 // returns current time in milliseconds
