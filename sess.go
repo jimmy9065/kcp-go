@@ -258,15 +258,16 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 		// api flow control
 		if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
 			n = len(b)
-			for {
-				if len(b) <= int(s.kcp.mss) {
-					s.kcp.Send(b)
-					break
-				} else {
-					s.kcp.Send(b[:s.kcp.mss])
-					b = b[s.kcp.mss:]
-				}
-			}
+			s.kcp.Send(b)
+			//for {
+			//	if len(b) <= int(s.kcp.mss) {
+			//		s.kcp.Send(b)
+			//		break
+			//	} else {
+			//		s.kcp.Send(b[:s.kcp.mss])
+			//		b = b[s.kcp.mss:]
+			//	}
+			//}
 
 			if !s.writeDelay {
 				s.kcp.flush(false)
