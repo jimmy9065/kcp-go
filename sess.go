@@ -341,6 +341,8 @@ func (s *UDPSession) SetDeadline(t time.Time) error {
 	defer s.mu.Unlock()
 	s.rd = t
 	s.wd = t
+	s.notifyReadEvent()
+	s.notifyWriteEvent()
 	return nil
 }
 
@@ -349,6 +351,7 @@ func (s *UDPSession) SetReadDeadline(t time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rd = t
+	s.notifyReadEvent()
 	return nil
 }
 
@@ -357,6 +360,7 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.wd = t
+	s.notifyWriteEvent()
 	return nil
 }
 
