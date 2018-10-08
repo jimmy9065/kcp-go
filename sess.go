@@ -510,11 +510,11 @@ func (s *UDPSession) output(buf []byte) {
 // kcp update, returns interval for next calling
 func (s *UDPSession) update() (interval time.Duration) {
 	s.mu.Lock()
-	s.kcp.flush(false)
-	if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
+	waitsnd := s.kcp.WaitSnd()
+	interval = time.Duration(s.kcp.flush(false)) * time.Millisecond
+	if s.kcp.WaitSnd() < waitsnd {
 		s.notifyWriteEvent()
 	}
-	interval = time.Duration(s.kcp.interval) * time.Millisecond
 	s.mu.Unlock()
 	return
 }
@@ -540,48 +540,54 @@ func (s *UDPSession) kcpInput(data []byte) {
 	var kcpInErrors, fecErrs, fecRecovered, fecParityShards uint64
 
 	if s.fecDecoder != nil {
-		f := s.fecDecoder.decodeBytes(data)
-		s.mu.Lock()
-		waitsnd := s.kcp.WaitSnd()
-		if f.flag == typeData {
-			if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
-				kcpInErrors++
-			}
-		}
+		if len(data) > fecHeaderSize { // must be larger than fec header size
+			f := s.fecDecoder.decodeBytes(data)
+			if f.flag == typeData || f.flag == typeFEC { // header check
+				if f.flag == typeFEC {
+					fecParityShards++
+				}
+				recovers := s.fecDecoder.decode(f)
 
-		if f.flag == typeData || f.flag == typeFEC {
-			if f.flag == typeFEC {
-				fecParityShards++
-			}
+				s.mu.Lock()
+				waitsnd := s.kcp.WaitSnd()
+				if f.flag == typeData {
+					if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
+						kcpInErrors++
+					}
+				}
 
-			recovers := s.fecDecoder.decode(f)
-			for _, r := range recovers {
-				if len(r) >= 2 { // must be larger than 2bytes
-					sz := binary.LittleEndian.Uint16(r)
-					if int(sz) <= len(r) && sz >= 2 {
-						if ret := s.kcp.Input(r[2:sz], false, s.ackNoDelay); ret == 0 {
-							fecRecovered++
+				for _, r := range recovers {
+					if len(r) >= 2 { // must be larger than 2bytes
+						sz := binary.LittleEndian.Uint16(r)
+						if int(sz) <= len(r) && sz >= 2 {
+							if ret := s.kcp.Input(r[2:sz], false, s.ackNoDelay); ret == 0 {
+								fecRecovered++
+							} else {
+								kcpInErrors++
+							}
 						} else {
-							kcpInErrors++
+							fecErrs++
 						}
 					} else {
 						fecErrs++
 					}
-				} else {
-					fecErrs++
 				}
-			}
-		}
 
-		// to notify the readers to receive the data
-		if n := s.kcp.PeekSize(); n > 0 {
-			s.notifyReadEvent()
+				// to notify the readers to receive the data
+				if n := s.kcp.PeekSize(); n > 0 {
+					s.notifyReadEvent()
+				}
+				// to notify the writers when queue is shorter(e.g. ACKed)
+				if s.kcp.WaitSnd() < waitsnd {
+					s.notifyWriteEvent()
+				}
+				s.mu.Unlock()
+			} else {
+				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+			}
+		} else {
+			atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 		}
-		// to notify the writers when queue is shorter(e.g. ACKed)
-		if s.kcp.WaitSnd() < waitsnd {
-			s.notifyWriteEvent()
-		}
-		s.mu.Unlock()
 	} else {
 		s.mu.Lock()
 		waitsnd := s.kcp.WaitSnd()
