@@ -798,7 +798,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 
 		// get the nearest rto
-		if rto := _itimediff(segment.rto, current); rto > 0 && rto < minrto {
+		if rto := _itimediff(segment.resendts, current); rto > 0 && rto < minrto {
 			minrto = rto
 		}
 	}
@@ -1005,8 +1005,9 @@ func (kcp *KCP) WaitSnd() int {
 // remove front n elements from queue
 func (kcp *KCP) remove_front(q []segment, n int) []segment {
 	newn := copy(q, q[n:])
-	for i := newn; i < len(q); i++ {
-		q[i] = segment{} // manual set nil for GC
+	gc := q[newn:]
+	for k := range gc {
+		gc[k].data = nil // de-ref data
 	}
 	return q[:newn]
 }
