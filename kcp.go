@@ -799,7 +799,6 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 
 		if needsend {
-			current = currentMs() // time update for a blocking call
 			segment.xmit++
 			segment.ts = current
 			segment.wnd = seg.wnd
@@ -1026,7 +1025,13 @@ func (kcp *KCP) WaitSnd() int {
 }
 
 // remove front n elements from queue
+// if the number of elements to remove is more than half of the size.
+// just shift the rear elements to front, otherwise just reslice q to q[n:]
+// then the cost of runtime.growslice can always be less than n/2
 func (kcp *KCP) remove_front(q []segment, n int) []segment {
-	newn := copy(q, q[n:])
-	return q[:newn]
+	if n > cap(q)/2 {
+		newn := copy(q, q[n:])
+		return q[:newn]
+	}
+	return q[n:]
 }

@@ -11,7 +11,7 @@ const (
 	fecHeaderSize      = 6
 	fecHeaderSizePlus2 = fecHeaderSize + 2 // plus 2B data size
 	typeData           = 0xf1
-	typeFEC            = 0xf2
+	typeParity         = 0xf2
 )
 
 // fecPacket is a decoded FEC packet
@@ -179,6 +179,10 @@ func (dec *fecDecoder) freeRange(first, n int, q []fecPacket) []fecPacket {
 	for i := first; i < first+n; i++ { // recycle buffer
 		xmitBuf.Put([]byte(q[i]))
 	}
+
+	if first == 0 && n < cap(q)/2 {
+		return q[n:]
+	}
 	copy(q[first:], q[first+n:])
 	return q[:len(q)-n]
 }
@@ -241,13 +245,16 @@ func newFECEncoder(dataShards, parityShards, offset int) *fecEncoder {
 // encodes the packet, outputs parity shards if we have collected quorum datashards
 // notice: the contents of 'ps' will be re-written in successive calling
 func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
+	// The header format:
+	// | FEC SEQID(4B) | FEC TYPE(2B) | SIZE (2B) | PAYLOAD(SIZE-2) |
+	// |<-headerOffset                |<-payloadOffset
 	enc.markData(b[enc.headerOffset:])
 	binary.LittleEndian.PutUint16(b[enc.payloadOffset:], uint16(len(b[enc.payloadOffset:])))
 
-	// copy data to fec datashards
+	// copy data from payloadOffset to fec shard cache
 	sz := len(b)
 	enc.shardCache[enc.shardCount] = enc.shardCache[enc.shardCount][:sz]
-	copy(enc.shardCache[enc.shardCount], b)
+	copy(enc.shardCache[enc.shardCount][enc.payloadOffset:], b[enc.payloadOffset:])
 	enc.shardCount++
 
 	// track max datashard length
@@ -274,7 +281,7 @@ func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 		if err := enc.codec.Encode(cache); err == nil {
 			ps = enc.shardCache[enc.dataShards:]
 			for k := range ps {
-				enc.markFEC(ps[k][enc.headerOffset:])
+				enc.markParity(ps[k][enc.headerOffset:])
 				ps[k] = ps[k][:enc.maxSize]
 			}
 		}
@@ -293,8 +300,9 @@ func (enc *fecEncoder) markData(data []byte) {
 	enc.next++
 }
 
-func (enc *fecEncoder) markFEC(data []byte) {
+func (enc *fecEncoder) markParity(data []byte) {
 	binary.LittleEndian.PutUint32(data, enc.next)
-	binary.LittleEndian.PutUint16(data[4:], typeFEC)
+	binary.LittleEndian.PutUint16(data[4:], typeParity)
+	// sequence wrap will only happen at parity shard
 	enc.next = (enc.next + 1) % enc.paws
 }
